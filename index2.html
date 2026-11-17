@@ -133,23 +133,23 @@
 
     <script>
         // 1. Klistra in din kostnadsfria API-nyckel från twelvedata.com nedan:
-        const API_KEY = "46fea2331f9c4da4944b8d0853c9e731";
+        const API_KEY = "DIN_TWELVEDATA_API_NYCKEL_HÄR";
 
-        // 2. Dina 9 svenska aktier (Twelve Data använder punkt i aktieslag på XSTO, t.ex. INVE.B:XSTO)
+        // 2. Korrekta Twelve Data-symboler för Nasdaq Stockholm (använder bindestreck för aktieslag)
         const STOCKS = [
-            { symbol: "ASSA.B:XSTO",   ticker: "ASSA B",   name: "Assa Abloy" },
+            { symbol: "ASSA-B:XSTO",   ticker: "ASSA B",   name: "Assa Abloy" },
             { symbol: "AXFO:XSTO",     ticker: "AXFO",     name: "Axfood" },
-            { symbol: "ESSITY.B:XSTO", ticker: "ESSITY B", name: "Essity" },
-            { symbol: "HM.B:XSTO",     ticker: "HM B",     name: "H&M" },
+            { symbol: "ESSITY-B:XSTO", ticker: "ESSITY B", name: "Essity" },
+            { symbol: "HM-B:XSTO",     ticker: "HM B",     name: "H&M" },
             { symbol: "HNSA:XSTO",     ticker: "HNSA",     name: "Hansa Bio" },
-            { symbol: "INDU.C:XSTO",   ticker: "INDU C",   name: "Industrivärden C" },
-            { symbol: "INVE.B:XSTO",   ticker: "INVE B",   name: "Investor B" },
-            { symbol: "SHB.A:XSTO",    ticker: "SHB A",    name: "Handelsbanken A" },
+            { symbol: "INDU-C:XSTO",   ticker: "INDU C",   name: "Industrivärden C" },
+            { symbol: "INVE-B:XSTO",   ticker: "INVE B",   name: "Investor B" },
+            { symbol: "SHB-A:XSTO",    ticker: "SHB A",    name: "Handelsbanken A" },
             { symbol: "SEYE:XSTO",     ticker: "SEYE",     name: "Smart Eye" }
         ];
 
-        const CACHE_KEY = "td_xsto_quotes_v1";
-        const CACHE_TIME_KEY = "td_xsto_quotes_time_v1";
+        const CACHE_KEY = "td_xsto_quotes_v2";
+        const CACHE_TIME_KEY = "td_xsto_quotes_time_v2";
         const CACHE_DURATION = 15 * 60 * 1000; // 15 minuter
 
         let quotesMap = {};
@@ -166,7 +166,6 @@
                 throw new Error(data.message || `API-fel (${data.code})`);
             }
 
-            // Vid 1 symbol returnerar Twelve Data objektet direkt, vid flera ett objekt per symbol
             if (stockBatch.length === 1) {
                 const sym = stockBatch[0].symbol;
                 quotesMap[sym] = data;
@@ -196,7 +195,7 @@
             }
 
             if (!API_KEY || API_KEY === "DIN_TWELVEDATA_API_NYCKEL_HÄR") {
-                showError("Lägg in din Twelve Data API-nyckel i <code>index2.html</code> på rad 135.");
+                showError("Lägg in din Twelve Data API-nyckel i <code>index2.html</code>.");
                 renderTable();
                 return;
             }
@@ -227,7 +226,6 @@
                 await fetchBatch(batch1);
                 renderTable();
 
-                // Vänta 61 sek så minutkvoten på 8 krediter nollställs innan nästa 4 hämtas
                 let secondsLeft = 61;
                 setStatus(`Hämtar 6–9 om ${secondsLeft}s...`);
 
