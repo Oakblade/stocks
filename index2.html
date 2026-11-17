@@ -171,7 +171,8 @@
                 const col = name => header.indexOf(name);
 
                 const iTicker = col("ticker"), iName = col("namn"), iPrice = col("pris"),
-                      iChange = col("ändring"), iPct = col("ändring%");
+                      iChange = col("ändring"), iPct = col("ändring%"),
+                      iBuy = col("inköpspris");
 
                 if ([iTicker, iPrice, iChange, iPct].some(i => i < 0)) {
                     throw new Error("Hittar inte rätt kolumner. Rubrikerna ska vara: Symbol, Ticker, Namn, Pris, Ändring, Ändring%");
@@ -180,6 +181,7 @@
                 const stocks = rows.map(r => ({
                     ticker: r[iTicker],
                     name: iName >= 0 ? r[iName] : "",
+                    buy: iBuy >= 0 ? toNumber(r[iBuy]) : NaN,
                     price: toNumber(r[iPrice]),
                     change: toNumber(r[iChange]),
                     pct: toNumber(r[iPct])
@@ -204,6 +206,7 @@
                     <thead>
                         <tr>
                             <th>Aktie</th>
+                            <th class="text-right">Inköpspris</th>
                             <th class="text-right">Senast</th>
                             <th class="text-right">Ändring</th>
                         </tr>
@@ -216,6 +219,9 @@
                     <td>
                         <strong>${escapeHtml(s.ticker)}</strong>
                         <span class="ticker-sub" title="${escapeHtml(s.name)}">${escapeHtml(s.name)}</span>
+                    </td>
+                    <td class="text-right" style="vertical-align: middle;">
+                        ${isNaN(s.buy) ? `<span style="color: var(--muted);">–</span>` : `${s.buy.toFixed(2)} kr`}
                     </td>`;
 
                 if (isNaN(s.price)) {
