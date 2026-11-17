@@ -5,11 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mina Aktier</title>
     <style>
-        body, html {
-            margin: 0;
-            padding: 0;
-            background-color: transparent;
-        }
+      html, body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        overflow: hidden; /* Hides scrollbars */
+      }
+      .tradingview-widget-container {
+        height: calc(100% + 32px); /* Pushes the bottom 32px footer out of view */
+      }
     </style>
 </head>
 <body>
