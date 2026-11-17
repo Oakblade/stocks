@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mina Aktier (Twelve Data)</title>
+    <title>Mina Aktier</title>
     <style>
         :root {
             --text-color: #1f2937;
@@ -46,10 +46,7 @@
             color: var(--muted);
             margin-right: 8px;
         }
-        .controls {
-            display: flex;
-            align-items: center;
-        }
+        .controls { display: flex; align-items: center; }
         .refresh-btn {
             background: none;
             border: 1px solid var(--border-color);
@@ -59,40 +56,19 @@
             font-size: 11px;
             color: var(--muted);
         }
-        .refresh-btn:hover {
-            background-color: var(--hover-bg);
-            color: var(--text-color);
-        }
-        .refresh-btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            text-align: left;
-        }
-        th, td {
-            padding: 6px 4px;
-            border-bottom: 1px solid var(--border-color);
-        }
+        .refresh-btn:hover { background-color: var(--hover-bg); color: var(--text-color); }
+        .refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        table { width: 100%; border-collapse: collapse; text-align: left; }
+        th, td { padding: 6px 4px; border-bottom: 1px solid var(--border-color); }
         th {
             font-weight: 600;
             color: var(--muted);
             font-size: 11px;
             text-transform: uppercase;
         }
-        .text-right {
-            text-align: right;
-        }
-        .positive {
-            color: var(--green);
-            font-weight: 500;
-        }
-        .negative {
-            color: var(--red);
-            font-weight: 500;
-        }
+        .text-right { text-align: right; }
+        .positive { color: var(--green); font-weight: 500; }
+        .negative { color: var(--red); font-weight: 500; }
         .ticker-sub {
             font-size: 11px;
             color: var(--muted);
@@ -101,13 +77,6 @@
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
-        }
-        .pending-badge {
-            font-size: 11px;
-            color: var(--muted);
-            background: var(--badge-bg);
-            padding: 2px 6px;
-            border-radius: 4px;
         }
         .error-banner {
             color: var(--red);
@@ -124,7 +93,7 @@
         <span>Mina Aktier</span>
         <div class="controls">
             <span id="status-text" class="status-text"></span>
-            <button id="refresh-btn" class="refresh-btn" onclick="loadAllStocks(true)">Uppdatera</button>
+            <button id="refresh-btn" class="refresh-btn" onclick="loadStocks()">Uppdatera</button>
         </div>
     </div>
 
@@ -132,50 +101,39 @@
     <div id="stock-container"></div>
 
     <script>
-        // 1. Klistra in din kostnadsfria API-nyckel från twelvedata.com nedan:
-        const API_KEY = "46fea2331f9c4da4944b8d0853c9e731";
+        // Klistra in länken från Google Sheets: Arkiv → Dela → Publicera på webben → CSV
+        const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTG0HUhqL1PjBqFDRtyK7hxUxNdtn-NOqTRtliAbF6Ol1JjrEtj3tdPPTGWNt3G3EHzJV0C9Zo6-bfe/pub?gid=0&single=true&output=csv";
 
-        // 2. Korrekta Twelve Data-symboler för Nasdaq Stockholm (använder bindestreck för aktieslag)
-        const STOCKS = [
-            { symbol: "ASSA-B:XSTO",   ticker: "ASSA B",   name: "Assa Abloy" },
-            { symbol: "AXFO:XSTO",     ticker: "AXFO",     name: "Axfood" },
-            { symbol: "ESSITY-B:XSTO", ticker: "ESSITY B", name: "Essity" },
-            { symbol: "HM-B:XSTO",     ticker: "HM B",     name: "H&M" },
-            { symbol: "HNSA:XSTO",     ticker: "HNSA",     name: "Hansa Bio" },
-            { symbol: "INDU-C:XSTO",   ticker: "INDU C",   name: "Industrivärden C" },
-            { symbol: "INVE-B:XSTO",   ticker: "INVE B",   name: "Investor B" },
-            { symbol: "SHB-A:XSTO",    ticker: "SHB A",    name: "Handelsbanken A" },
-            { symbol: "SEYE:XSTO",     ticker: "SEYE",     name: "Smart Eye" }
-        ];
+        const AUTO_REFRESH_MS = 5 * 60 * 1000; // 5 minuter
 
-        const CACHE_KEY = "td_xsto_quotes_v2";
-        const CACHE_TIME_KEY = "td_xsto_quotes_time_v2";
-        const CACHE_DURATION = 15 * 60 * 1000; // 15 minuter
-
-        let quotesMap = {};
-        let batchTimer = null;
-
-        async function fetchBatch(stockBatch) {
-            const symbolsParam = stockBatch.map(s => s.symbol).join(",");
-            const url = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(symbolsParam)}&apikey=${encodeURIComponent(API_KEY)}`;
-
-            const response = await fetch(url);
-            const data = await response.json();
-
-            if (data.code && data.code !== 200) {
-                throw new Error(data.message || `API-fel (${data.code})`);
+        // Enkel CSV-parser som klarar citattecken (t.ex. "123,45")
+        function parseCSV(text) {
+            const rows = [];
+            let row = [], field = "", inQuotes = false;
+            for (let i = 0; i < text.length; i++) {
+                const c = text[i];
+                if (inQuotes) {
+                    if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
+                    else if (c === '"') inQuotes = false;
+                    else field += c;
+                } else if (c === '"') inQuotes = true;
+                else if (c === ",") { row.push(field); field = ""; }
+                else if (c === "\n") { row.push(field); rows.push(row); row = []; field = ""; }
+                else if (c !== "\r") field += c;
             }
+            if (field || row.length) { row.push(field); rows.push(row); }
+            return rows;
+        }
 
-            if (stockBatch.length === 1) {
-                const sym = stockBatch[0].symbol;
-                quotesMap[sym] = data;
-            } else {
-                for (const stock of stockBatch) {
-                    if (data[stock.symbol]) {
-                        quotesMap[stock.symbol] = data[stock.symbol];
-                    }
-                }
-            }
+        // Hanterar både "123.45" och svenska "123,45" / "1 234,56"
+        function toNumber(s) {
+            if (s == null) return NaN;
+            const clean = String(s).replace(/[\s %]/g, "").replace("−", "-").replace(",", ".");
+            return clean === "" ? NaN : Number(clean);
+        }
+
+        function escapeHtml(s) {
+            return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
         }
 
         function setStatus(text) {
@@ -183,88 +141,64 @@
         }
 
         function showError(msg) {
-            const box = document.getElementById("error-box");
-            box.innerHTML = msg ? `<div class="error-banner">${msg}</div>` : "";
+            document.getElementById("error-box").innerHTML =
+                msg ? `<div class="error-banner">${msg}</div>` : "";
         }
 
-        async function loadAllStocks(forceRefresh = false) {
+        async function loadStocks() {
             const btn = document.getElementById("refresh-btn");
-            if (batchTimer) {
-                clearTimeout(batchTimer);
-                batchTimer = null;
-            }
 
-            if (!API_KEY || API_KEY === "DIN_TWELVEDATA_API_NYCKEL_HÄR") {
-                showError("Lägg in din Twelve Data API-nyckel i <code>index2.html</code>.");
-                renderTable();
-                return;
-            }
-
-            const now = Date.now();
-            const cachedRaw = localStorage.getItem(CACHE_KEY);
-            const cachedTime = Number(localStorage.getItem(CACHE_TIME_KEY) || 0);
-
-            if (!forceRefresh && cachedRaw && (now - cachedTime < CACHE_DURATION)) {
-                quotesMap = JSON.parse(cachedRaw);
-                const minsAgo = Math.max(1, Math.round((now - cachedTime) / 60000));
-                setStatus(`Cachad (${minsAgo} min sedan)`);
-                showError("");
-                renderTable();
+            if (!CSV_URL || CSV_URL.startsWith("KLISTRA_IN")) {
+                showError("Lägg in länken till ditt publicerade Google Sheet (CSV) i <code>CSV_URL</code>.");
                 return;
             }
 
             btn.disabled = true;
-            showError("");
-            quotesMap = {};
-            renderTable();
-
-            const batch1 = STOCKS.slice(0, 5); // 5 krediter (under gränsen på 8/min)
-            const batch2 = STOCKS.slice(5);    // 4 krediter
+            setStatus("Hämtar...");
 
             try {
-                setStatus("Hämtar 1–5...");
-                await fetchBatch(batch1);
-                renderTable();
+                const sep = CSV_URL.includes("?") ? "&" : "?";
+                const res = await fetch(`${CSV_URL}${sep}t=${Date.now()}`, { cache: "no-store" });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const text = await res.text();
 
-                let secondsLeft = 61;
-                setStatus(`Hämtar 6–9 om ${secondsLeft}s...`);
+                if (text.trim().startsWith("<")) {
+                    throw new Error("Fick HTML istället för CSV – kontrollera att arket är publicerat som CSV.");
+                }
 
-                const countdown = setInterval(() => {
-                    secondsLeft--;
-                    if (secondsLeft > 0) {
-                        setStatus(`Hämtar 6–9 om ${secondsLeft}s...`);
-                    } else {
-                        clearInterval(countdown);
-                    }
-                }, 1000);
+                const rows = parseCSV(text).filter(r => r.some(c => c.trim() !== ""));
+                const header = rows.shift().map(h => h.trim().toLowerCase());
+                const col = name => header.indexOf(name);
 
-                batchTimer = setTimeout(async () => {
-                    clearInterval(countdown);
-                    try {
-                        setStatus("Hämtar 6–9...");
-                        await fetchBatch(batch2);
-                        localStorage.setItem(CACHE_KEY, JSON.stringify(quotesMap));
-                        localStorage.setItem(CACHE_TIME_KEY, Date.now().toString());
-                        setStatus("Uppdaterad nyss");
-                        renderTable();
-                    } catch (err2) {
-                        showError(`Del 2 misslyckades: ${err2.message}`);
-                        setStatus("");
-                    } finally {
-                        btn.disabled = false;
-                    }
-                }, 61000);
+                const iTicker = col("ticker"), iName = col("namn"), iPrice = col("pris"),
+                      iChange = col("ändring"), iPct = col("ändring%");
 
+                if ([iTicker, iPrice, iChange, iPct].some(i => i < 0)) {
+                    throw new Error("Hittar inte rätt kolumner. Rubrikerna ska vara: Symbol, Ticker, Namn, Pris, Ändring, Ändring%");
+                }
+
+                const stocks = rows.map(r => ({
+                    ticker: r[iTicker],
+                    name: iName >= 0 ? r[iName] : "",
+                    price: toNumber(r[iPrice]),
+                    change: toNumber(r[iChange]),
+                    pct: toNumber(r[iPct])
+                }));
+
+                renderTable(stocks);
+                showError("");
+                const now = new Date();
+                setStatus(`Uppdaterad ${now.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })}`);
             } catch (err) {
                 console.error(err);
-                showError(`Kunde inte hämta data: ${err.message}`);
+                showError(`Kunde inte hämta data: ${escapeHtml(err.message)}`);
                 setStatus("");
+            } finally {
                 btn.disabled = false;
             }
         }
 
-        function renderTable() {
-            const container = document.getElementById("stock-container");
+        function renderTable(stocks) {
             let html = `
                 <table>
                     <thead>
@@ -277,66 +211,41 @@
                     <tbody>
             `;
 
-            STOCKS.forEach(stock => {
-                const q = quotesMap[stock.symbol];
+            for (const s of stocks) {
+                const nameCell = `
+                    <td>
+                        <strong>${escapeHtml(s.ticker)}</strong>
+                        <span class="ticker-sub" title="${escapeHtml(s.name)}">${escapeHtml(s.name)}</span>
+                    </td>`;
 
-                if (!q) {
-                    html += `
-                        <tr>
-                            <td>
-                                <strong>${stock.ticker}</strong>
-                                <span class="ticker-sub">${stock.name}</span>
-                            </td>
-                            <td colspan="2" class="text-right" style="vertical-align: middle;">
-                                <span class="pending-badge">Väntar...</span>
-                            </td>
-                        </tr>
-                    `;
-                    return;
+                if (isNaN(s.price)) {
+                    html += `<tr>${nameCell}
+                        <td colspan="2" class="text-right" style="vertical-align: middle; color: var(--red); font-size: 11px;">
+                            Ingen data (kolla symbolen i arket)
+                        </td></tr>`;
+                    continue;
                 }
 
-                if (q.status === "error" || !q.close) {
-                    html += `
-                        <tr>
-                            <td>
-                                <strong>${stock.ticker}</strong>
-                                <span class="ticker-sub">${stock.name}</span>
-                            </td>
-                            <td colspan="2" class="text-right" style="vertical-align: middle; color: var(--red); font-size: 11px;">
-                                ${q.message || "Saknas på XSTO"}
-                            </td>
-                        </tr>
-                    `;
-                    return;
-                }
-
-                const price = parseFloat(q.close).toFixed(2);
-                const changeVal = parseFloat(q.change || 0);
-                const pctVal = parseFloat(q.percent_change || 0);
-                const isPos = changeVal >= 0;
+                const change = isNaN(s.change) ? 0 : s.change;
+                const pct = isNaN(s.pct) ? 0 : s.pct;
+                const isPos = change >= 0;
                 const cls = isPos ? "positive" : "negative";
                 const sign = isPos ? "+" : "";
 
-                html += `
-                    <tr>
-                        <td>
-                            <strong>${stock.ticker}</strong>
-                            <span class="ticker-sub" title="${stock.name}">${stock.name}</span>
-                        </td>
-                        <td class="text-right" style="vertical-align: middle;">${price} kr</td>
-                        <td class="text-right" style="vertical-align: middle;">
-                            <span class="${cls}">${sign}${changeVal.toFixed(2)}<br>
-                            <span style="font-size:11px;">(${sign}${pctVal.toFixed(2)}%)</span></span>
-                        </td>
-                    </tr>
-                `;
-            });
+                html += `<tr>${nameCell}
+                    <td class="text-right" style="vertical-align: middle;">${s.price.toFixed(2)} kr</td>
+                    <td class="text-right" style="vertical-align: middle;">
+                        <span class="${cls}">${sign}${change.toFixed(2)}<br>
+                        <span style="font-size:11px;">(${sign}${pct.toFixed(2)}%)</span></span>
+                    </td></tr>`;
+            }
 
             html += `</tbody></table>`;
-            container.innerHTML = html;
+            document.getElementById("stock-container").innerHTML = html;
         }
 
-        loadAllStocks();
+        loadStocks();
+        setInterval(loadStocks, AUTO_REFRESH_MS);
     </script>
 </body>
 </html>
