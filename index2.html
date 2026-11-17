@@ -6,7 +6,6 @@
     <title>Mina Aktier</title>
     <style>
         :root {
-            --bg-color: #ffffff;
             --text-color: #1f2937;
             --border-color: #e5e7eb;
             --hover-bg: #f9fafb;
@@ -71,7 +70,7 @@
             font-size: 11px;
             color: var(--muted);
             display: block;
-            max-width: 110px;
+            max-width: 120px;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -98,14 +97,50 @@
     </div>
 
     <script>
-        const SYMBOLS = "ASSA-B.ST,AXFO.ST,ESSITY-B.ST,HM-B.ST,HNSA.ST,INDU-C.ST,INVE-B.ST,SHB-A.ST,SEYE.ST";
-        const CACHE_KEY = "yahoo_stock_data_cache";
-        const CACHE_TIME_KEY = "yahoo_stock_data_time";
-        const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes cache TTL
+        const STOCKS = [
+            { symbol: "ASSA-B.ST", name: "Assa Abloy" },
+            { symbol: "AXFO.ST", name: "Axfood" },
+            { symbol: "ESSITY-B.ST", name: "Essity" },
+            { symbol: "HM-B.ST", name: "H&M" },
+            { symbol: "HNSA.ST", name: "Hansa Bio" },
+            { symbol: "INDU-C.ST", name: "Industrivärden C" },
+            { symbol: "INVE-B.ST", name: "Investor B" },
+            { symbol: "SHB-A.ST", name: "Handelsbanken A" },
+            { symbol: "SEYE.ST", name: "Smart Eye" }
+        ];
+
+        const CACHE_KEY = "yahoo_v8_stock_cache";
+        const CACHE_TIME_KEY = "yahoo_v8_stock_time";
+        const CACHE_DURATION = 5 * 60 * 1000; // 5 minuter
+
+        async function fetchSingleStock(stock) {
+            const targetUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${stock.symbol}?interval=1d&range=1d`;
+            const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
+
+            const res = await fetch(proxyUrl);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+            const json = await res.json();
+            const meta = json?.chart?.result?.[0]?.meta;
+            if (!meta) throw new Error(`Ingen data`);
+
+            const price = meta.regularMarketPrice;
+            const prevClose = meta.chartPreviousClose || meta.previousClose;
+            const change = price - prevClose;
+            const changePercent = prevClose ? (change / prevClose) * 100 : 0;
+
+            return {
+                symbol: stock.symbol,
+                name: stock.name,
+                price,
+                change,
+                changePercent
+            };
+        }
 
         async function fetchStockData(forceRefresh = false) {
             const container = document.getElementById("stock-container");
-            const now = new Date().getTime();
+            const now = Date.now();
             const cachedData = localStorage.getItem(CACHE_KEY);
             const cachedTime = localStorage.getItem(CACHE_TIME_KEY);
 
@@ -115,21 +150,25 @@
             }
 
             try {
-                const apiUrl = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(SYMBOLS)}`;
-                const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(apiUrl)}`;
-                
-                const response = await fetch(proxyUrl);
-                if (!response.ok) throw new Error("Kunde inte nå servern");
-                
-                const data = await response.json();
-                const quotes = data.quoteResponse.result;
+                const results = [];
+                for (let i = 0; i < STOCKS.length; i++) {
+                    const stock = STOCKS[i];
+                    container.innerHTML = `<div class="loading">Laddar ${stock.name} (${i + 1}/${STOCKS.length})...</div>`;
+                    
+                    const data = await fetchSingleStock(stock);
+                    results.push(data);
+                    
+                    // Kort paus på 250ms mellan anropen för att inte överbelasta proxyn
+                    if (i < STOCKS.length - 1) {
+                        await new Promise(resolve => setTimeout(resolve, 250));
+                    }
+                }
 
-                localStorage.setItem(CACHE_KEY, JSON.stringify(quotes));
-                localStorage.setItem(CACHE_TIME_KEY, now);
-
-                renderTable(quotes);
+                localStorage.setItem(CACHE_KEY, JSON.stringify(results));
+                localStorage.setItem(CACHE_TIME_KEY, now.toString());
+                renderTable(results);
             } catch (err) {
-                console.error(err);
+                console.error("Fel vid hämtning:", err);
                 if (cachedData) {
                     renderTable(JSON.parse(cachedData));
                 } else {
@@ -140,7 +179,6 @@
 
         function renderTable(quotes) {
             const container = document.getElementById("stock-container");
-            
             let html = `
                 <table>
                     <thead>
@@ -155,12 +193,11 @@
 
             quotes.forEach(q => {
                 const ticker = q.symbol.replace('.ST', '');
-                const name = q.shortName || ticker;
-                const price = q.regularMarketPrice !== undefined ? q.regularMarketPrice.toFixed(2) : "-";
-                const change = q.regularMarketChange !== undefined ? q.regularMarketChange.toFixed(2) : 0;
-                const changePercent = q.regularMarketChangePercent !== undefined ? q.regularMarketChangePercent.toFixed(2) : 0;
+                const price = q.price !== undefined ? q.price.toFixed(2) : "-";
+                const change = q.change !== undefined ? q.change.toFixed(2) : "0.00";
+                const changePercent = q.changePercent !== undefined ? q.changePercent.toFixed(2) : "0.00";
                 
-                const isPos = change >= 0;
+                const isPos = q.change >= 0;
                 const changeClass = isPos ? "positive" : "negative";
                 const sign = isPos ? "+" : "";
 
@@ -168,10 +205,10 @@
                     <tr>
                         <td>
                             <strong>${ticker}</strong>
-                            <span class="ticker-sub" title="${name}">${name}</span>
+                            <span class="ticker-sub" title="${q.name}">${q.name}</span>
                         </td>
                         <td class="text-right" style="vertical-align: middle;">${price} kr</td>
-                        <td class="text-right" style="vertical-align: middle;" class="${changeClass}">
+                        <td class="text-right" style="vertical-align: middle;">
                             <span class="${changeClass}">${sign}${change}<br><span style="font-size:11px;">(${sign}${changePercent}%)</span></span>
                         </td>
                     </tr>
@@ -182,7 +219,6 @@
             container.innerHTML = html;
         }
 
-        // Run on load
         fetchStockData();
     </script>
 </body>
