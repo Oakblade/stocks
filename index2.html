@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mina Aktier</title>
+    <title>Mina Aktier (Twelve Data)</title>
     <style>
         :root {
             --text-color: #1f2937;
@@ -12,6 +12,18 @@
             --green: #10b981;
             --red: #ef4444;
             --muted: #6b7280;
+            --badge-bg: #f3f4f6;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --text-color: #f3f4f6;
+                --border-color: #374151;
+                --hover-bg: #1f2937;
+                --green: #34d399;
+                --red: #f87171;
+                --muted: #9ca3af;
+                --badge-bg: #374151;
+            }
         }
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -28,6 +40,16 @@
             margin-bottom: 8px;
             font-weight: 600;
         }
+        .status-text {
+            font-size: 11px;
+            font-weight: 400;
+            color: var(--muted);
+            margin-right: 8px;
+        }
+        .controls {
+            display: flex;
+            align-items: center;
+        }
         .refresh-btn {
             background: none;
             border: 1px solid var(--border-color);
@@ -39,6 +61,11 @@
         }
         .refresh-btn:hover {
             background-color: var(--hover-bg);
+            color: var(--text-color);
+        }
+        .refresh-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
         }
         table {
             width: 100%;
@@ -70,114 +97,175 @@
             font-size: 11px;
             color: var(--muted);
             display: block;
-            max-width: 120px;
+            max-width: 130px;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
         }
-        .loading, .error {
-            text-align: center;
-            padding: 20px;
+        .pending-badge {
+            font-size: 11px;
             color: var(--muted);
-            font-size: 13px;
+            background: var(--badge-bg);
+            padding: 2px 6px;
+            border-radius: 4px;
         }
-        .error {
+        .error-banner {
             color: var(--red);
+            font-size: 12px;
+            padding: 8px;
+            border: 1px solid var(--red);
+            border-radius: 4px;
+            margin-bottom: 8px;
         }
     </style>
 </head>
 <body>
     <div class="header">
         <span>Mina Aktier</span>
-        <button class="refresh-btn" onclick="fetchStockData(true)">Uppdatera</button>
+        <div class="controls">
+            <span id="status-text" class="status-text"></span>
+            <button id="refresh-btn" class="refresh-btn" onclick="loadAllStocks(true)">Uppdatera</button>
+        </div>
     </div>
-    
-    <div id="stock-container">
-        <div class="loading">Laddar kurser...</div>
-    </div>
+
+    <div id="error-box"></div>
+    <div id="stock-container"></div>
 
     <script>
+        // 1. Klistra in din kostnadsfria API-nyckel från twelvedata.com nedan:
+        const API_KEY = "46fea2331f9c4da4944b8d0853c9e731";
+
+        // 2. Dina 9 svenska aktier (Twelve Data använder punkt i aktieslag på XSTO, t.ex. INVE.B:XSTO)
         const STOCKS = [
-            { symbol: "ASSA-B.ST", name: "Assa Abloy" },
-            { symbol: "AXFO.ST", name: "Axfood" },
-            { symbol: "ESSITY-B.ST", name: "Essity" },
-            { symbol: "HM-B.ST", name: "H&M" },
-            { symbol: "HNSA.ST", name: "Hansa Bio" },
-            { symbol: "INDU-C.ST", name: "Industrivärden C" },
-            { symbol: "INVE-B.ST", name: "Investor B" },
-            { symbol: "SHB-A.ST", name: "Handelsbanken A" },
-            { symbol: "SEYE.ST", name: "Smart Eye" }
+            { symbol: "ASSA.B:XSTO",   ticker: "ASSA B",   name: "Assa Abloy" },
+            { symbol: "AXFO:XSTO",     ticker: "AXFO",     name: "Axfood" },
+            { symbol: "ESSITY.B:XSTO", ticker: "ESSITY B", name: "Essity" },
+            { symbol: "HM.B:XSTO",     ticker: "HM B",     name: "H&M" },
+            { symbol: "HNSA:XSTO",     ticker: "HNSA",     name: "Hansa Bio" },
+            { symbol: "INDU.C:XSTO",   ticker: "INDU C",   name: "Industrivärden C" },
+            { symbol: "INVE.B:XSTO",   ticker: "INVE B",   name: "Investor B" },
+            { symbol: "SHB.A:XSTO",    ticker: "SHB A",    name: "Handelsbanken A" },
+            { symbol: "SEYE:XSTO",     ticker: "SEYE",     name: "Smart Eye" }
         ];
 
-        const CACHE_KEY = "yahoo_v8_stock_cache";
-        const CACHE_TIME_KEY = "yahoo_v8_stock_time";
-        const CACHE_DURATION = 5 * 60 * 1000; // 5 minuter
+        const CACHE_KEY = "td_xsto_quotes_v1";
+        const CACHE_TIME_KEY = "td_xsto_quotes_time_v1";
+        const CACHE_DURATION = 15 * 60 * 1000; // 15 minuter
 
-        async function fetchSingleStock(stock) {
-            const targetUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${stock.symbol}?interval=1d&range=1d`;
-            const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
+        let quotesMap = {};
+        let batchTimer = null;
 
-            const res = await fetch(proxyUrl);
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        async function fetchBatch(stockBatch) {
+            const symbolsParam = stockBatch.map(s => s.symbol).join(",");
+            const url = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(symbolsParam)}&apikey=${encodeURIComponent(API_KEY)}`;
 
-            const json = await res.json();
-            const meta = json?.chart?.result?.[0]?.meta;
-            if (!meta) throw new Error(`Ingen data`);
+            const response = await fetch(url);
+            const data = await response.json();
 
-            const price = meta.regularMarketPrice;
-            const prevClose = meta.chartPreviousClose || meta.previousClose;
-            const change = price - prevClose;
-            const changePercent = prevClose ? (change / prevClose) * 100 : 0;
+            if (data.code && data.code !== 200) {
+                throw new Error(data.message || `API-fel (${data.code})`);
+            }
 
-            return {
-                symbol: stock.symbol,
-                name: stock.name,
-                price,
-                change,
-                changePercent
-            };
+            // Vid 1 symbol returnerar Twelve Data objektet direkt, vid flera ett objekt per symbol
+            if (stockBatch.length === 1) {
+                const sym = stockBatch[0].symbol;
+                quotesMap[sym] = data;
+            } else {
+                for (const stock of stockBatch) {
+                    if (data[stock.symbol]) {
+                        quotesMap[stock.symbol] = data[stock.symbol];
+                    }
+                }
+            }
         }
 
-        async function fetchStockData(forceRefresh = false) {
-            const container = document.getElementById("stock-container");
-            const now = Date.now();
-            const cachedData = localStorage.getItem(CACHE_KEY);
-            const cachedTime = localStorage.getItem(CACHE_TIME_KEY);
+        function setStatus(text) {
+            document.getElementById("status-text").textContent = text;
+        }
 
-            if (!forceRefresh && cachedData && cachedTime && (now - cachedTime < CACHE_DURATION)) {
-                renderTable(JSON.parse(cachedData));
+        function showError(msg) {
+            const box = document.getElementById("error-box");
+            box.innerHTML = msg ? `<div class="error-banner">${msg}</div>` : "";
+        }
+
+        async function loadAllStocks(forceRefresh = false) {
+            const btn = document.getElementById("refresh-btn");
+            if (batchTimer) {
+                clearTimeout(batchTimer);
+                batchTimer = null;
+            }
+
+            if (!API_KEY || API_KEY === "DIN_TWELVEDATA_API_NYCKEL_HÄR") {
+                showError("Lägg in din Twelve Data API-nyckel i <code>index2.html</code> på rad 135.");
+                renderTable();
                 return;
             }
 
-            try {
-                const results = [];
-                for (let i = 0; i < STOCKS.length; i++) {
-                    const stock = STOCKS[i];
-                    container.innerHTML = `<div class="loading">Laddar ${stock.name} (${i + 1}/${STOCKS.length})...</div>`;
-                    
-                    const data = await fetchSingleStock(stock);
-                    results.push(data);
-                    
-                    // Kort paus på 250ms mellan anropen för att inte överbelasta proxyn
-                    if (i < STOCKS.length - 1) {
-                        await new Promise(resolve => setTimeout(resolve, 250));
-                    }
-                }
+            const now = Date.now();
+            const cachedRaw = localStorage.getItem(CACHE_KEY);
+            const cachedTime = Number(localStorage.getItem(CACHE_TIME_KEY) || 0);
 
-                localStorage.setItem(CACHE_KEY, JSON.stringify(results));
-                localStorage.setItem(CACHE_TIME_KEY, now.toString());
-                renderTable(results);
+            if (!forceRefresh && cachedRaw && (now - cachedTime < CACHE_DURATION)) {
+                quotesMap = JSON.parse(cachedRaw);
+                const minsAgo = Math.max(1, Math.round((now - cachedTime) / 60000));
+                setStatus(`Cachad (${minsAgo} min sedan)`);
+                showError("");
+                renderTable();
+                return;
+            }
+
+            btn.disabled = true;
+            showError("");
+            quotesMap = {};
+            renderTable();
+
+            const batch1 = STOCKS.slice(0, 5); // 5 krediter (under gränsen på 8/min)
+            const batch2 = STOCKS.slice(5);    // 4 krediter
+
+            try {
+                setStatus("Hämtar 1–5...");
+                await fetchBatch(batch1);
+                renderTable();
+
+                // Vänta 61 sek så minutkvoten på 8 krediter nollställs innan nästa 4 hämtas
+                let secondsLeft = 61;
+                setStatus(`Hämtar 6–9 om ${secondsLeft}s...`);
+
+                const countdown = setInterval(() => {
+                    secondsLeft--;
+                    if (secondsLeft > 0) {
+                        setStatus(`Hämtar 6–9 om ${secondsLeft}s...`);
+                    } else {
+                        clearInterval(countdown);
+                    }
+                }, 1000);
+
+                batchTimer = setTimeout(async () => {
+                    clearInterval(countdown);
+                    try {
+                        setStatus("Hämtar 6–9...");
+                        await fetchBatch(batch2);
+                        localStorage.setItem(CACHE_KEY, JSON.stringify(quotesMap));
+                        localStorage.setItem(CACHE_TIME_KEY, Date.now().toString());
+                        setStatus("Uppdaterad nyss");
+                        renderTable();
+                    } catch (err2) {
+                        showError(`Del 2 misslyckades: ${err2.message}`);
+                        setStatus("");
+                    } finally {
+                        btn.disabled = false;
+                    }
+                }, 61000);
+
             } catch (err) {
-                console.error("Fel vid hämtning:", err);
-                if (cachedData) {
-                    renderTable(JSON.parse(cachedData));
-                } else {
-                    container.innerHTML = `<div class="error">Kunde inte ladda kurser. Kontrollera nätverket.</div>`;
-                }
+                console.error(err);
+                showError(`Kunde inte hämta data: ${err.message}`);
+                setStatus("");
+                btn.disabled = false;
             }
         }
 
-        function renderTable(quotes) {
+        function renderTable() {
             const container = document.getElementById("stock-container");
             let html = `
                 <table>
@@ -191,25 +279,56 @@
                     <tbody>
             `;
 
-            quotes.forEach(q => {
-                const ticker = q.symbol.replace('.ST', '');
-                const price = q.price !== undefined ? q.price.toFixed(2) : "-";
-                const change = q.change !== undefined ? q.change.toFixed(2) : "0.00";
-                const changePercent = q.changePercent !== undefined ? q.changePercent.toFixed(2) : "0.00";
-                
-                const isPos = q.change >= 0;
-                const changeClass = isPos ? "positive" : "negative";
+            STOCKS.forEach(stock => {
+                const q = quotesMap[stock.symbol];
+
+                if (!q) {
+                    html += `
+                        <tr>
+                            <td>
+                                <strong>${stock.ticker}</strong>
+                                <span class="ticker-sub">${stock.name}</span>
+                            </td>
+                            <td colspan="2" class="text-right" style="vertical-align: middle;">
+                                <span class="pending-badge">Väntar...</span>
+                            </td>
+                        </tr>
+                    `;
+                    return;
+                }
+
+                if (q.status === "error" || !q.close) {
+                    html += `
+                        <tr>
+                            <td>
+                                <strong>${stock.ticker}</strong>
+                                <span class="ticker-sub">${stock.name}</span>
+                            </td>
+                            <td colspan="2" class="text-right" style="vertical-align: middle; color: var(--red); font-size: 11px;">
+                                ${q.message || "Saknas på XSTO"}
+                            </td>
+                        </tr>
+                    `;
+                    return;
+                }
+
+                const price = parseFloat(q.close).toFixed(2);
+                const changeVal = parseFloat(q.change || 0);
+                const pctVal = parseFloat(q.percent_change || 0);
+                const isPos = changeVal >= 0;
+                const cls = isPos ? "positive" : "negative";
                 const sign = isPos ? "+" : "";
 
                 html += `
                     <tr>
                         <td>
-                            <strong>${ticker}</strong>
-                            <span class="ticker-sub" title="${q.name}">${q.name}</span>
+                            <strong>${stock.ticker}</strong>
+                            <span class="ticker-sub" title="${stock.name}">${stock.name}</span>
                         </td>
                         <td class="text-right" style="vertical-align: middle;">${price} kr</td>
                         <td class="text-right" style="vertical-align: middle;">
-                            <span class="${changeClass}">${sign}${change}<br><span style="font-size:11px;">(${sign}${changePercent}%)</span></span>
+                            <span class="${cls}">${sign}${changeVal.toFixed(2)}<br>
+                            <span style="font-size:11px;">(${sign}${pctVal.toFixed(2)}%)</span></span>
                         </td>
                     </tr>
                 `;
@@ -219,7 +338,7 @@
             container.innerHTML = html;
         }
 
-        fetchStockData();
+        loadAllStocks();
     </script>
 </body>
 </html>
